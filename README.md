@@ -1,2 +1,0 @@
-# groovyRunner
-Run anything needed!
