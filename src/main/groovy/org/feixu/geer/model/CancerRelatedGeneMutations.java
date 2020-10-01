@@ -8,6 +8,7 @@ import java.util.List;
 public class CancerRelatedGeneMutations {
     private String name;
     List<String> organs;
+    private Boolean result;
 
     public String getName() {
         return name;
@@ -25,5 +26,13 @@ public class CancerRelatedGeneMutations {
     public CancerRelatedGeneMutations setOrgans(List<String> organs) {
         this.organs = organs;
         return this;
+    }
+
+    public Boolean getResult() {
+        return result;
+    }
+
+    public void setResult(Boolean result) {
+        this.result = result;
     }
 }

@@ -11,8 +11,8 @@ public class UserInfo {
     private SexEnum sex;
     private String agent;
     private String number;
-    private float height;
-    private float weight;
+    private double height;
+    private double weight;
     private int smokeLevel;
     private int drinkWineLevel;
     private boolean hypertension;
@@ -63,20 +63,20 @@ public class UserInfo {
         return this;
     }
 
-    public float getHeight() {
+    public double getHeight() {
         return height;
     }
 
-    public UserInfo setHeight(float height) {
+    public UserInfo setHeight(double height) {
         this.height = height;
         return this;
     }
 
-    public float getWeight() {
+    public double getWeight() {
         return weight;
     }
 
-    public UserInfo setWeight(float weight) {
+    public UserInfo setWeight(double weight) {
         this.weight = weight;
         return this;
     }

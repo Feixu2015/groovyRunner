@@ -28,4 +28,13 @@ public enum SexEnum {
         this.description = description;
         return this;
     }
+
+    public static SexEnum getByDesc(String description) {
+        for (SexEnum value : SexEnum.values()) {
+            if (value.description.equals(description)) {
+                return value;
+            }
+        }
+        return null;
+    }
 }

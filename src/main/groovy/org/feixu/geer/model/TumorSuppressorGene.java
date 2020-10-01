@@ -8,6 +8,7 @@ import java.util.List;
 public class TumorSuppressorGene {
     private String name;
     private List<String> effectOrgans;
+    private Boolean result;
 
     public String getName() {
         return name;
@@ -25,5 +26,13 @@ public class TumorSuppressorGene {
     public TumorSuppressorGene setEffectOrgans(List<String> effectOrgans) {
         this.effectOrgans = effectOrgans;
         return this;
+    }
+
+    public Boolean getResult() {
+        return result;
+    }
+
+    public void setResult(Boolean result) {
+        this.result = result;
     }
 }

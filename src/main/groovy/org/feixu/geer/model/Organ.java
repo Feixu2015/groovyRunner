@@ -25,4 +25,15 @@ public class Organ {
         return this;
     }
 
+    public static String getRiskDesc(int riskLevel) {
+        if (riskLevel <= 5) {
+            return "阴性";
+        } else if (riskLevel <= 10) {
+            return "注意";
+        } else if (riskLevel <= 15) {
+            return "警告";
+        } else {
+            return "阳性";
+        }
+    }
 }
