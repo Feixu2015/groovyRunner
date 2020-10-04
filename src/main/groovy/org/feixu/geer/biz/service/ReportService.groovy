@@ -926,10 +926,26 @@ class ReportService {
         addText(doc, pageNo, user.name, [78, 720] as float[], 21.5f, [0.408f, 0.255f, 0.384f] as float[])
         def countY = 683
         // 阳性
-        addText(doc, pageNo, "阳性 ${riskCount[0]} 个", [200, countY] as float[], 12f, [0.953f, 0.267f, 0.235f] as float[])
+        addText(doc, pageNo, "阳性 ${riskCount[0]} 个", [278, countY] as float[], 11.5f, [0.953f, 0.267f, 0.235f] as float[])
         // 警告
-        addText(doc, pageNo, "警告 ${riskCount[1]} 个", [280, countY] as float[], 12f, [0.463f, 0.294f, 0.443f] as float[])
+        addText(doc, pageNo, "警告 ${riskCount[1]} 个", [337, countY] as float[], 11.5f, [0.463f, 0.294f, 0.443f] as float[])
         // 注意
-        addText(doc, pageNo, "注意 ${riskCount[2]} 个", [360, countY] as float[], 12f, [0.957f, 0.725f, 0.078] as float[])
+        addText(doc, pageNo, "注意 ${riskCount[2]} 个", [405, countY] as float[], 11.5f, [0.957f, 0.725f, 0.078f] as float[])
+
+        def checkY1 = 580
+        // 身高
+        addText(doc, pageNo, "${user.height.toString()}cm", [146, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        // 吸烟
+        addText(doc, pageNo, user.smokeLevel , [299, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        // 高血压
+        addText(doc, pageNo, user.hypertension, [448, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+
+        def checkY2 = 555
+        // 体重
+        addText(doc, pageNo, "${user.weight.toString()}kg", [146, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        // 饮酒
+        addText(doc, pageNo, user.drinkWineLevel, [299, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        // 糖尿病
+        addText(doc, pageNo, user.diabetes, [448, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
     }
 }

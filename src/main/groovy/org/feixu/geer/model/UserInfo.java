@@ -5,7 +5,6 @@ import org.feixu.geer.enums.SexEnum;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 /**
  * 用户信息
@@ -18,10 +17,10 @@ public class UserInfo {
     private String number;
     private Double height;
     private Double weight;
-    private Integer smokeLevel;
-    private Integer drinkWineLevel;
-    private Boolean hypertension;
-    private Boolean diabetes;
+    private String smokeLevel = "无";
+    private String drinkWineLevel = "无";
+    private String hypertension = "无";
+    private String diabetes = "无";
 
     public String getName() {
         return name;
@@ -86,40 +85,38 @@ public class UserInfo {
         return this;
     }
 
-    public Integer getSmokeLevel() {
+    public String getSmokeLevel() {
         return smokeLevel;
     }
 
-    public UserInfo setSmokeLevel(Integer smokeLevel) {
+    public UserInfo setSmokeLevel(String smokeLevel) {
         this.smokeLevel = smokeLevel;
         return this;
     }
 
-    public Integer getDrinkWineLevel() {
+    public String getDrinkWineLevel() {
         return drinkWineLevel;
     }
 
-    public UserInfo setDrinkWineLevel(Integer drinkWineLevel) {
+    public UserInfo setDrinkWineLevel(String drinkWineLevel) {
         this.drinkWineLevel = drinkWineLevel;
         return this;
     }
 
-    public Boolean isHypertension() {
+    public String getHypertension() {
         return hypertension;
     }
 
-    public UserInfo setHypertension(Boolean hypertension) {
+    public void setHypertension(String hypertension) {
         this.hypertension = hypertension;
-        return this;
     }
 
-    public Boolean isDiabetes() {
+    public String getDiabetes() {
         return diabetes;
     }
 
-    public UserInfo setDiabetes(Boolean diabetes) {
+    public void setDiabetes(String diabetes) {
         this.diabetes = diabetes;
-        return this;
     }
 
     // extra
