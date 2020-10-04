@@ -38,8 +38,10 @@ import org.apache.poi.ss.usermodel.Sheet
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory
 import org.feixu.geer.enums.SexEnum
+import org.feixu.geer.model.CancerRelatedGeneMutations
 import org.feixu.geer.model.Organ
 import org.feixu.geer.model.ReportInfo
+import org.feixu.geer.model.TumorSuppressorGene
 import org.junit.jupiter.api.Test
 
 import javax.imageio.ImageIO
@@ -319,17 +321,26 @@ class GeerTest {
     def excelColumns() {
         def setDisease = { ReportInfo report, String colName, def value ->
             Organ organ = report.organs.find { it.name == colName }
-            organ.riskLevel = value ? Integer.valueOf(value) : 0
+            organ.riskLevel = value || (value instanceof String && StringUtils.isNotBlank(value)) ?
+                    Double.valueOf(value).intValue() : 0
         }
 
         def setTumorSuppressorGene = { ReportInfo report, String colName, def value ->
-            def gene = report.getTumorSuppressorGeneList().find { it.name == colName }
-            gene.result = null != value && Math.round(value) > 0
+            def gene = new TumorSuppressorGene(
+                    name: colName,
+                    result: null != value || (value instanceof String && StringUtils.isNotBlank(value)) ?
+                            Double.valueOf(value).intValue() : 0
+            )
+            report.getTumorSuppressorGeneList().add(gene)
         }
 
         def setGeneMutations = { ReportInfo report, String colName, def value ->
-            def geneMutations = report.getCancerRelatedGeneMutations().find { it.name == colName }
-            geneMutations.result = null != value && Math.round(value) > 0
+            def geneMutation = new CancerRelatedGeneMutations(
+                    name: colName,
+                    result: null != value || (value instanceof String && StringUtils.isNotBlank(value)) ?
+                            Double.valueOf(value).intValue() : 0
+            )
+            report.getCancerRelatedGeneMutations().add(geneMutation)
         }
 
         [
@@ -354,7 +365,9 @@ class GeerTest {
                                     SexEnum sex = SexEnum.getByDesc(value)
                                     report.userInfo.sex = sex
                                     // 初始化
-                                    report.organs = ReportInfo.getReportOrgansBySex(sex)
+                                    report.organs = ReportInfo.getAllOrganNames().collect {
+                                        new Organ(name: it)
+                                    }
                                 }
                         ],
                 '登记编号'            :
@@ -508,14 +521,14 @@ class GeerTest {
                         [
                                 cellType: CellType.NUMERIC,
                                 field: { ReportInfo report, String colName, def value ->
-                                    report.userInfo.height = (Math.round(Double.valueOf(value) / 100) * 100) / 100
+                                    report.userInfo.height = new BigDecimal(value.toString()).round(2).doubleValue()
                                 }
                         ],
                 '体重'              :
                         [
                                 cellType: CellType.NUMERIC,
                                 field: { ReportInfo report, String colName, def value ->
-                                    report.userInfo.weight = (Math.round(Double.valueOf(value) / 100) * 100) / 100
+                                    report.userInfo.weight = new BigDecimal(value.toString()).round(2).doubleValue()
                                 }
                         ],
                 '是否吸烟'            :
@@ -914,34 +927,30 @@ class GeerTest {
                 // read each cell
                 def userName = row.getCell(0, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK).toString()
                 println "First Cell Value:$userName"
-                if (null != userName && StringUtils.isNotBlank(userName)) {
+                if (index > 0 && null != userName && StringUtils.isNotBlank(userName)) {
                     println "===Row ${index + 1}==="
                     ReportInfo report = new ReportInfo()
                     80.times {
                         Cell cell = row.getCell(it, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK)
                         println "cell is:$cell"
                         def colName = colAndTypeMap.keySet()[it]
+                        println "col is:$colName"
                         def fieldMap = colAndTypeMap[colName].field
                         def value = cell?.toString()
-                        println "value is:$value"
                         if (StringUtils.isNotBlank(value)) {
-                            if (0 == index) {
-                                value = cell.getStringCellValue()
-                            } else {
-                                try {
-                                    if (CellType.NUMERIC == colAndTypeMap[colName].cellType) {
-                                        if (dateColNames.contains(colName)) {
-                                            value = cell?.getDateCellValue().format('yyyy-MM-dd HH:mm:ss')
-                                        } else {
-                                            value = cell?.getNumericCellValue()
-                                        }
+                            try {
+                                if (CellType.NUMERIC == colAndTypeMap[colName].cellType) {
+                                    if (dateColNames.contains(colName)) {
+                                        value = cell?.getDateCellValue().format('yyyy-MM-dd HH:mm:ss')
                                     } else {
-                                        value = cell?.getStringCellValue()
+                                        value = cell?.getNumericCellValue()
                                     }
-                                } catch (e) {
-                                    println e
-                                    value = null
+                                } else {
+                                    value = cell?.getStringCellValue()
                                 }
+                            } catch (e) {
+                                println e
+                                value = null
                             }
                         }
                         println value
@@ -1202,6 +1211,6 @@ class GeerTest {
 
     @Test
     public void generateReport() {
-        readExcel()
+
     }
 }
