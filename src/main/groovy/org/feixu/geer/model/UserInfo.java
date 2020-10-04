@@ -2,6 +2,11 @@ package org.feixu.geer.model;
 
 import org.feixu.geer.enums.SexEnum;
 
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
 /**
  * 用户信息
  */
@@ -11,12 +16,12 @@ public class UserInfo {
     private SexEnum sex;
     private String agent;
     private String number;
-    private double height;
-    private double weight;
-    private int smokeLevel;
-    private int drinkWineLevel;
-    private boolean hypertension;
-    private boolean diabetes;
+    private Double height;
+    private Double weight;
+    private Integer smokeLevel;
+    private Integer drinkWineLevel;
+    private Boolean hypertension;
+    private Boolean diabetes;
 
     public String getName() {
         return name;
@@ -63,56 +68,56 @@ public class UserInfo {
         return this;
     }
 
-    public double getHeight() {
+    public Double getHeight() {
         return height;
     }
 
-    public UserInfo setHeight(double height) {
+    public UserInfo setHeight(Double height) {
         this.height = height;
         return this;
     }
 
-    public double getWeight() {
+    public Double getWeight() {
         return weight;
     }
 
-    public UserInfo setWeight(double weight) {
+    public UserInfo setWeight(Double weight) {
         this.weight = weight;
         return this;
     }
 
-    public int getSmokeLevel() {
+    public Integer getSmokeLevel() {
         return smokeLevel;
     }
 
-    public UserInfo setSmokeLevel(int smokeLevel) {
+    public UserInfo setSmokeLevel(Integer smokeLevel) {
         this.smokeLevel = smokeLevel;
         return this;
     }
 
-    public int getDrinkWineLevel() {
+    public Integer getDrinkWineLevel() {
         return drinkWineLevel;
     }
 
-    public UserInfo setDrinkWineLevel(int drinkWineLevel) {
+    public UserInfo setDrinkWineLevel(Integer drinkWineLevel) {
         this.drinkWineLevel = drinkWineLevel;
         return this;
     }
 
-    public boolean isHypertension() {
+    public Boolean isHypertension() {
         return hypertension;
     }
 
-    public UserInfo setHypertension(boolean hypertension) {
+    public UserInfo setHypertension(Boolean hypertension) {
         this.hypertension = hypertension;
         return this;
     }
 
-    public boolean isDiabetes() {
+    public Boolean isDiabetes() {
         return diabetes;
     }
 
-    public UserInfo setDiabetes(boolean diabetes) {
+    public UserInfo setDiabetes(Boolean diabetes) {
         this.diabetes = diabetes;
         return this;
     }
@@ -142,5 +147,10 @@ public class UserInfo {
         } else {
             return "体重不足";
         }
+    }
+
+    public int getAge() {
+        LocalDate birthday = LocalDate.parse(this.getBirthday());
+        return (int)(Duration.between(birthday.atStartOfDay(), LocalDateTime.now()).toDays()/365.25);
     }
 }

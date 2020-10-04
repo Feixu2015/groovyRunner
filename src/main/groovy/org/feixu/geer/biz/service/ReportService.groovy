@@ -1,12 +1,15 @@
 package org.feixu.geer.biz.service
 
 import org.apache.commons.lang.StringUtils
+import org.apache.commons.lang.math.RandomUtils
 import org.apache.pdfbox.multipdf.LayerUtility
 import org.apache.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
 import org.apache.pdfbox.pdmodel.font.PDFont
 import org.apache.pdfbox.pdmodel.font.PDType0Font
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject
 import org.apache.poi.ss.usermodel.Cell
 import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.Row
@@ -25,6 +28,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.util.ResourceUtils
 
+import java.awt.Color
 import java.awt.geom.AffineTransform
 
 @Service
@@ -654,7 +658,7 @@ class ReportService {
                             try {
                                 if (CellType.NUMERIC == colAndTypeMap[colName].cellType) {
                                     if (dateColNames.contains(colName)) {
-                                        value = cell?.getDateCellValue().format('yyyy-MM-dd HH:mm:ss')
+                                        value = cell?.getDateCellValue().format('yyyy-MM-dd')
                                     } else {
                                         value = cell?.getNumericCellValue()
                                     }
@@ -705,11 +709,27 @@ class ReportService {
             // 1. 用户信息
             File templateFirstPart = ResourceUtils.getFile("classpath:meterial/Template_用户信息_综合详解.pdf")
             PDDocument doc = PDDocument.load(templateFirstPart)
-            reportAddUserInfo(doc, 0, user)
+            reportAddUserInfo(doc, 0, report)
 
             // 2. 综合详述
+            // 2.1 绘制图表
+            drawHistogram(doc, 1, report)
+            def riskLevelCount = [
+                    report.organs.stream().filter({ it -> it.riskLevel > 15 && it.riskLevel <= 20 }).count(),
+                    report.organs.stream().filter({ it -> it.riskLevel > 10 && it.riskLevel <= 15 }).count(),
+                    report.organs.stream().filter({ it -> it.riskLevel > 5 && it.riskLevel <= 10 }).count(),
+                    report.organs.stream().filter({ it -> it.riskLevel <= 5 }).count(),
+            ]
+            // 2.2 各个风险级别的数量
+            fillRiskLevelNum(doc, 1, riskLevelCount as int[])
+            // 2.3 详细信息
+            fillDetailInfo(doc, 2, report, riskLevelCount as int[])
+
             // 3. 器官详解
+
             // 4. 表格填充
+
+
             // 5. 保存
             String reportFile = "${targetFolder.getAbsolutePath()}/${user.name}_检测报告_${new Date().format('yyyyMMdd')}.pdf"
             doc.save(reportFile)
@@ -731,9 +751,23 @@ class ReportService {
      * @param pageNo
      * @param user
      */
-    public void reportAddUserInfo(PDDocument doc, int pageNo, UserInfo user) {
+    private void reportAddUserInfo(PDDocument doc, int pageNo, ReportInfo report) {
+        UserInfo user = report.userInfo;
+        def lineSpaceHeight = 19
         // 姓名
-        addText(doc, pageNo, user.name, [260, 412] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        addText(doc, pageNo, user.name, [260, 412 - lineSpaceHeight * 0] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        // 出生年月
+        addText(doc, pageNo, user.birthday, [260, 412 - lineSpaceHeight * 1] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        // 性别/年龄
+        addText(doc, pageNo, "${user.sex.description}/${user.getAge()}", [260, 412 - lineSpaceHeight * 2] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        // 委托机构
+        addText(doc, pageNo, user.agent, [260, 412 - lineSpaceHeight * 3] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        // 登记编号
+        addText(doc, pageNo, user.number, [260, 412 - lineSpaceHeight * 4] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        // 登记日期
+        addText(doc, pageNo, report.registerDate, [260, 412 - lineSpaceHeight * 5] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
+        // 报告日期
+        addText(doc, pageNo, report.reportDate, [260, 412 - lineSpaceHeight * 6] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
     }
 
     /**
@@ -746,7 +780,11 @@ class ReportService {
      * @param nonStrokingColor [ r, g, b ] as float[]
      * @return
      */
-    def addText(PDDocument doc, int pageNo, String message, float[] position, float fontSize, float[] nonStrokingColor) {
+    private def addText(PDDocument doc, int pageNo, String message, float[] position, float fontSize, float[] nonStrokingColor) {
+        if (StringUtils.isBlank(message)) {
+            log.warn("nothing to write")
+            return
+        }
         File file = ResourceUtils.getFile("classpath:meterial/Template_空白页.pdf")
         PDDocument targetDoc = PDDocument.load(file)
         PDPageContentStream cs = new PDPageContentStream(targetDoc, targetDoc.getPage(0))
@@ -757,6 +795,7 @@ class ReportService {
 
         cs.newLineAtOffset(position[0], position[1])
         cs.setFont(font, fontSize)
+        cs.setStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
         cs.setNonStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
         cs.showText(message)
         cs.endText()
@@ -764,10 +803,133 @@ class ReportService {
         cs.close()
 
         LayerUtility layerUtility = new LayerUtility(doc)
-        PDFormXObject firstForm = layerUtility.importPageAsForm(targetDoc, pageNo)
+        PDFormXObject firstForm = layerUtility.importPageAsForm(targetDoc, 0)
         AffineTransform affineTransform = new AffineTransform()
-        layerUtility.appendFormAsLayer(doc.getPage(0), firstForm, affineTransform, "text${UUID.randomUUID().toString()}")
+        layerUtility.appendFormAsLayer(doc.getPage(pageNo), firstForm, affineTransform, "text${UUID.randomUUID().toString()}")
 
         targetDoc.close()
+    }
+
+    /**
+     *
+     * @param doc
+     * @param pageNo
+     * @return
+     */
+    private def drawHistogram(PDDocument doc, int pageNo, ReportInfo report) {
+        /*File file = new File("/Users/idcos/Downloads/zhoulinxian/报告基础元素/基础组成部分/Template_综合详解.pdf")
+        PDDocument doc = PDDocument.load(file)*/
+        PDPage page = doc.getPage(pageNo)
+        // 疾病的风险等级
+        List<Organ> organs = report.getOrgans()
+        println "total: ${organs.size()}"
+        def riskLevelColorMap = [
+                '阴性': new Color(173, 170, 153),
+                '注意': new Color(245, 188, 30),
+                '警告': new Color(103, 63, 98),
+                '阳性': new Color(228, 58, 60)
+        ]
+        organs.eachWithIndex { organ, index ->
+            println "$organ.name $organ.riskLevel"
+            // 对号
+            def checkX = 100f
+            def checkY = 350f
+            def riskLevel = organ ? organ.riskLevel : 0
+            def level = Organ.getRiskDesc(riskLevel)
+            def fileName = "classpath:meterial/disease_img/${level}-${organ.name}.png"
+            addImageFromResource(fileName, doc, page, [checkX + (24 * index), 843.5 - checkY] as float[], 0.3f, 0.3f)
+            if (riskLevel > 0) {
+                // 绘制柱状图
+                Color columnColor = riskLevelColorMap[level]
+                def colWidth = 16
+                addRectangle(doc, page, columnColor,
+                        [checkX + 3.7 + ((colWidth + 7.93) * index), 843.5 + 24.75 - checkY, colWidth, riskLevel * 10.72] as float[],
+                        PDPageContentStream.AppendMode.APPEND)
+            }
+        }
+
+        /*File f = new File("/Users/idcos/Downloads/zhoulinxian/报告基础元素/基础组成部分/result_综合详解.pdf")
+        doc.save(f.getAbsolutePath())
+        doc*/
+    }
+
+    /**
+     *
+     * @param imagePath
+     * @param doc
+     * @param page
+     * @param position [ x, y ] as float[]
+     * @param scaleWidth 0.3
+     * @param scaleHeight 0.3
+     * @return
+     */
+    private def addImageFromResource(String imagePath, PDDocument doc, PDPage page, float[] position, float scaleWidth = 1.0F, float scaleHeight = 1.0F) {
+        File image = ResourceUtils.getFile(imagePath)
+        PDImageXObject pdImage = PDImageXObject.createFromFileByContent(image, doc)
+        PDPageContentStream contentStream = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)
+        contentStream.drawImage(pdImage, position[0], position[1], (float) (pdImage.getWidth() * scaleWidth), (float) (pdImage.getHeight() * scaleHeight))
+        contentStream.close()
+    }
+
+    private def addImageFromPath(String image, PDDocument doc, PDPage page, float[] position, float scaleWidth = 1.0F, float scaleHeight = 1.0F) {
+        PDImageXObject pdImage = PDImageXObject.createFromFile(image, doc)
+        PDPageContentStream contentStream = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)
+        contentStream.drawImage(pdImage, position[0], position[1], (float) (pdImage.getWidth() * scaleWidth), (float) (pdImage.getHeight() * scaleHeight))
+        contentStream.close()
+    }
+
+    /**
+     * 添加颜色矩形
+     *
+     * @param doc
+     * @param page
+     * @param color
+     * @param rectangle [200, 650, 100, 100] as float[]
+     * @return
+     */
+    private def addRectangle(PDDocument doc, PDPage page, Color color, float[] rectangle, PDPageContentStream.AppendMode appendMode = PDPageContentStream.AppendMode.APPEND) {
+        //Instantiating the PDPageContentStream class
+        PDPageContentStream contentStream = new PDPageContentStream(doc,
+                page, appendMode, false)
+
+        //Setting the non stroking color
+        contentStream.setNonStrokingColor(color)
+
+        //Drawing a rectangle
+        contentStream.addRect(rectangle[0], rectangle[1], rectangle[2], rectangle[3])
+
+        //Drawing a rectangle
+        contentStream.fill()
+
+        //Closing the ContentStream object
+        contentStream.close()
+    }
+
+    /**
+     * 填充风险级别数量统计
+     *
+     * @param doc
+     * @param pageNo
+     * @param riskLevels [ 阳性, 警告, 注意, 阴性 ] as int[]
+     * @return
+     */
+    private def fillRiskLevelNum(PDDocument doc, int pageNo = 0, int[] riskLevels) {
+        addText(doc, pageNo, riskLevels[0].toString(), [135 - (riskLevels[0] > 9 ? 15 : 0), 366] as float[], 50.02f, [0.953f, 0.267f, 0.235f] as float[])
+        addText(doc, pageNo, riskLevels[1].toString(), [135 + 100 - (riskLevels[1] > 9 ? 15 : 0), 366] as float[], 50.02f, [0.463f, 0.294f, 0.443f] as float[])
+        addText(doc, pageNo, riskLevels[2].toString(), [135 + 200 - (riskLevels[2] > 9 ? 15 : 0), 366] as float[], 50.02f, [0.957f, 0.725f, 0.078] as float[])
+        addText(doc, pageNo, riskLevels[3].toString(), [135 + 300 - (riskLevels[3] > 9 ? 15 : 0), 366] as float[], 50.02f, [0.686f, 0.667f, 0.600f] as float[])
+    }
+
+    private def fillDetailInfo(PDDocument doc, int pageNo, ReportInfo report, int[] riskCount) {
+        UserInfo user = report.userInfo
+        // 姓名
+        addText(doc, pageNo, user.name, [78, 720] as float[], 21.5f, [0.408f, 0.255f, 0.384f] as float[])
+        def countY = 683
+        // 阳性
+        addText(doc, pageNo, "阳性 ${riskCount[0]} 个", [200, countY] as float[], 12f, [0.953f, 0.267f, 0.235f] as float[])
+        // 警告
+        addText(doc, pageNo, "警告 ${riskCount[1]} 个", [280, countY] as float[], 12f, [0.463f, 0.294f, 0.443f] as float[])
+        // 注意
+        addText(doc, pageNo, "注意 ${riskCount[2]} 个", [360, countY] as float[], 12f, [0.957f, 0.725f, 0.078] as float[])
     }
 }
