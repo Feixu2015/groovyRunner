@@ -6,6 +6,7 @@ import org.springframework.lang.NonNull;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 报告信息
@@ -171,6 +172,33 @@ public class ReportInfo {
             organs.add(organ);
         }
 
+        return organs;
+    }
+
+    /**
+     * 获取已检测的器官
+     * @return
+     */
+    public List<Organ> getCheckedOrgans() {
+        return this.organs.stream()
+                .filter(it -> getOrganNamesBySex().stream().anyMatch(organ -> organ.equals(it.getName())))
+                .collect(Collectors.toList());
+    }
+
+    private List<String> getOrganNamesBySex() {
+        List<String> organs = new ArrayList<>();
+        organs.addAll(Arrays.asList(commonOrgans[0]));
+        switch (this.userInfo.getSex()) {
+            case male:
+                organs.addAll(Arrays.asList(maleOrgans));
+                break;
+            case female:
+                organs.addAll(Arrays.asList(femaleOrgans));
+                break;
+            default:
+                break;
+        }
+        organs.addAll(Arrays.asList(commonOrgans[1]));
         return organs;
     }
 }

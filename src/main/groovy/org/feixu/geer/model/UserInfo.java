@@ -126,7 +126,7 @@ public class UserInfo {
      * @return
      */
     public String getBMI() {
-        return String.format("%.2f", weight/(Math.sqrt(height)));
+        return String.format("%.2f", (weight * 0.5)/(Math.pow(height/100, 2)));
     }
 
     /**

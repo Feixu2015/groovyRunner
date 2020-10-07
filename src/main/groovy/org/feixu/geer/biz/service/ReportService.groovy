@@ -32,6 +32,7 @@ import org.springframework.util.ResourceUtils
 
 import java.awt.Color
 import java.awt.geom.AffineTransform
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
 @Service
@@ -255,28 +256,28 @@ class ReportService {
                         [
                                 cellType: CellType.STRING,
                                 field   : { ReportInfo report, String colName, def value ->
-                                    report.userInfo.smokeLevel = '无' == value ? 0 : 1
+                                    report.userInfo.smokeLevel = value
                                 }
                         ],
                 '饮酒频度'            :
                         [
                                 cellType: CellType.STRING,
                                 field   : { ReportInfo report, String colName, def value ->
-                                    report.userInfo.drinkWineLevel = '无' == value ? 0 : 1
+                                    report.userInfo.drinkWineLevel = value
                                 }
                         ],
                 '高血压'             :
                         [
                                 cellType: CellType.STRING,
                                 field   : { ReportInfo report, String colName, def value ->
-                                    report.userInfo.hypertension = '无' == value
+                                    report.userInfo.hypertension = value
                                 }
                         ],
                 '糖尿病'             :
                         [
                                 cellType: CellType.STRING,
                                 field   : { ReportInfo report, String colName, def value ->
-                                    report.userInfo.hypertension = '无' == value
+                                    report.userInfo.hypertension = value
                                 }
                         ],
                 'BMI'             :
@@ -687,7 +688,7 @@ class ReportService {
                 try {
                     inp.close()
                 } catch (ex) {
-
+                    log.error(ex.getMessage())
                 }
             }
         }
@@ -697,38 +698,53 @@ class ReportService {
     public void createReport(File excel, File targetFolder) {
         // 1. 读取excel
         List<ReportInfo> reports = readExcel(excel)
+        log.info('reports is:' + JSON.toJSONString(reports, true))
         // 2. 遍历生成报告
         reports.each {
             produceReportByReportInfo(it, targetFolder)
         }
     }
 
-    public ReportResult produceReportByReportInfo(ReportInfo report, File targetFolder) {
+    private ReportResult produceReportByReportInfo(ReportInfo report, File targetFolder) {
         ReportResult result = new ReportResult()
 
         try {
-            File blankPage = ResourceUtils.getFile("classpath:meterial/Template_空白页.pdf")
             UserInfo user = report.userInfo
             // 1. 用户信息
             File templateFirstPart = ResourceUtils.getFile("classpath:meterial/Template_用户信息_综合详解.pdf")
             PDDocument doc = PDDocument.load(templateFirstPart)
-            reportAddUserInfo(doc, 0, report)
+            reportAddUserInfo(doc, 1, report)
 
             // 2. 综合详述
             // 2.1 绘制图表
-            drawHistogram(doc, 1, report)
+            drawHistogram(doc, 2, report)
+            List<Organ> checkedOrgans = report.getCheckedOrgans()
+            List<Organ> positiveOrgans = checkedOrgans.stream().filter({ it -> it.riskLevel > 15 && it.riskLevel <= 20 }).collect()
+            List<Organ> warnOrgans = checkedOrgans.stream().filter({ it -> it.riskLevel > 10 && it.riskLevel <= 15 }).collect()
+            List<Organ> attentionOrgans = checkedOrgans.stream().filter({ it -> it.riskLevel > 5 && it.riskLevel <= 10 }).collect()
+            List<Organ> negativeOrgans = checkedOrgans.stream().filter({ it -> it.riskLevel <= 5 }).collect()
             def riskLevelCount = [
-                    report.organs.stream().filter({ it -> it.riskLevel > 15 && it.riskLevel <= 20 }).count(),
-                    report.organs.stream().filter({ it -> it.riskLevel > 10 && it.riskLevel <= 15 }).count(),
-                    report.organs.stream().filter({ it -> it.riskLevel > 5 && it.riskLevel <= 10 }).count(),
-                    report.organs.stream().filter({ it -> it.riskLevel <= 5 }).count(),
+                    positiveOrgans.size(),
+                    warnOrgans.size(),
+                    attentionOrgans.size(),
+                    negativeOrgans.size()
             ]
             // 2.2 各个风险级别的数量
-            fillRiskLevelNum(doc, 1, riskLevelCount as int[])
+            fillRiskLevelNum(doc, 2, riskLevelCount as int[])
             // 2.3 详细信息
-            fillDetailInfo(doc, 2, report, riskLevelCount as int[])
+            fillDetailInfo(doc, 3, report, riskLevelCount as int[])
+            // 2.4 生活习惯建议
+
+            // 2.5 饮食习惯建议
 
             // 3. 器官详解
+            // 阳性
+            List<PDDocument> tempDocs = []
+            addOrganDetailToReport(doc, positiveOrgans, 'positive', tempDocs)
+            // 警告
+            addOrganDetailToReport(doc, warnOrgans, 'warn', tempDocs)
+            // 注意
+            addOrganDetailToReport(doc, attentionOrgans, 'attention', tempDocs)
 
             // 4. 表格填充
             File file = ResourceUtils.getFile("classpath:meterial/Template_检查结果.pdf")
@@ -746,6 +762,9 @@ class ReportService {
             doc.close()
             // close other pdf
             templateDoc.close()
+            tempDocs.each {
+                it.close()
+            }
 
             result.isSuccess = true
         } catch (e) {
@@ -754,6 +773,15 @@ class ReportService {
         }
 
         result
+    }
+
+    private void addOrganDetailToReport(PDDocument doc, List<Organ> organs, def riskLevel, def tempDocs) {
+        organs.each {
+            File organDetail = ResourceUtils.getFile("classpath:meterial/detail/${riskLevel}/${it.name}.pdf")
+            PDDocument organDoc = PDDocument.load(organDetail)
+            doc.addPage(organDoc.getPage(0))
+            tempDocs << organDoc
+        }
     }
 
     /**
@@ -932,13 +960,24 @@ class ReportService {
         addText(doc, pageNo, riskLevels[3].toString(), [135 + 300 - (riskLevels[3] > 9 ? 15 : 0), 366] as float[], 50.02f, [0.686f, 0.667f, 0.600f] as float[])
     }
 
+    /**
+     * 填充详细信息
+     * @param doc
+     * @param pageNo
+     * @param report
+     * @param riskCount
+     * @return
+     */
     private def fillDetailInfo(PDDocument doc, int pageNo, ReportInfo report, int[] riskCount) {
         UserInfo user = report.userInfo
+        def total = riskCount.sum()
         // 姓名
         addText(doc, pageNo, user.name, [78, 720] as float[], 21.5f, [0.408f, 0.255f, 0.384f] as float[])
         def countY = 683
+        // 总数
+        addText(doc, pageNo, total.toString(), [126, countY] as float[], 11.5f, [0.2f, 0.2f, 0.2f] as float[])
         // 阳性
-        addText(doc, pageNo, "阳性 ${riskCount[0]} 个", [278, countY] as float[], 11.5f, [0.953f, 0.267f, 0.235f] as float[])
+        addText(doc, pageNo, "阳性 ${riskCount[0]} 个", [275, countY] as float[], 11.5f, [0.953f, 0.267f, 0.235f] as float[])
         // 警告
         addText(doc, pageNo, "警告 ${riskCount[1]} 个", [337, countY] as float[], 11.5f, [0.463f, 0.294f, 0.443f] as float[])
         // 注意
@@ -946,19 +985,59 @@ class ReportService {
 
         def checkY1 = 580
         // 身高
-        addText(doc, pageNo, "${user.height.toString()}cm", [146, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        addText(doc, pageNo, "${user.height}cm", [146, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
         // 吸烟
-        addText(doc, pageNo, user.smokeLevel , [299, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        addText(doc, pageNo, user.smokeLevel, [299, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
         // 高血压
         addText(doc, pageNo, user.hypertension, [448, checkY1] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
 
         def checkY2 = 555
         // 体重
-        addText(doc, pageNo, "${user.weight.toString()}kg", [146, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+        BigDecimal bg = new BigDecimal(user.weight/2);
+        double weightInKg = bg.setScale(1, BigDecimal.ROUND_HALF_UP).doubleValue()
+        addText(doc, pageNo, "${weightInKg}kg", [146, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
         // 饮酒
         addText(doc, pageNo, user.drinkWineLevel, [299, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
         // 糖尿病
         addText(doc, pageNo, user.diabetes, [448, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
+
+        // BMI
+        addText(doc, pageNo, user.name, [63, 513] as float[], 14f, [0.408f, 0.255f, 0.384f] as float[])
+        addText(doc, pageNo, user.getBMI(), [110, 488] as float[], 15f, [0.2f, 0.2f, 0.2f] as float[])
+        def bmiLevelX = user.getBMILevel().size() > 2 ? 90 : 108
+        addText(doc, pageNo, user.getBMILevel(), [bmiLevelX, 463] as float[], 18f, [0.2f, 0.2f, 0.2f] as float[])
+        // mark
+        // 上 下 左 右
+        def bmiLevelMap = [
+                '体重不足': [
+                        [268, 505, 65, 2],
+                        [268, 453, 65, 2],
+                        [268, 453, 2, 52 + 2],
+                        [268 + 65, 453, 2, 52 + 2]
+                ],
+                '正常'  : [
+                        [333, 505, 66, 2],
+                        [333, 453, 66, 2],
+                        [333, 453, 2, 52 + 2],
+                        [333 + 66, 453, 2, 52 + 2]
+                ],
+                '过重'  : [
+                        [399, 505, 66, 2],
+                        [399, 453, 66, 2],
+                        [399, 453, 2, 52 + 2],
+                        [399 + 66, 453, 2, 52 + 2]
+                ],
+                '肥胖'  : [
+                        [465, 505, 66, 2],
+                        [465, 453, 66, 2],
+                        [465, 453, 2, 52 + 2],
+                        [465 + 66, 453, 2, 52 + 2]
+                ]
+        ]
+        def rectangle = bmiLevelMap[user.getBMILevel()].value
+        rectangle.each {
+            addRectangle(doc, doc.getPage(pageNo), Color.RED, it as float[])
+        }
     }
 
     /**
@@ -984,11 +1063,11 @@ class ReportService {
 
                 // 对应疾病
                 // 填充列
-                def relation = getTumorSuppressorGeneRelatedOrgan().find{ it -> it.key == gene.name }
+                def relation = getTumorSuppressorGeneRelatedOrgan().find { it -> it.key == gene.name }
                 //println JSON.toJSONString(relation)
                 def relatedDisease = relation.value.organs.split(',').collect { it.trim() }
                 relatedDisease.each { organ ->
-                    def x = ReportInfo.getAllOrganNames().findIndexOf { it -> it == organ}
+                    def x = ReportInfo.getAllOrganNames().findIndexOf { it -> it == organ }
                     def diseaseX = 160f
                     def diseaseY = 111f
                     addRectangle(templateDoc, page, Color.RED, [-0.5 + diseaseX + (18.1 + 2.368) * x, 843.5 - 10 - diseaseY - (10 + 2.368) * y, 18.2, 10] as float[])
@@ -1006,10 +1085,10 @@ class ReportService {
                         [-0.5 + checkX
                          , 843.5 - 12 - checkY - (10 + 2.368) * y] as float[], 0.3f, 0.3f)
                 // 疾病
-                def relation = getCancerRelatedGeneMutationsRelatedOrgan().find{ it -> it.key == gene.name }
+                def relation = getCancerRelatedGeneMutationsRelatedOrgan().find { it -> it.key == gene.name }
                 def relatedDisease = relation.value.organs.split(',').collect { it.trim() }
                 relatedDisease.each { organ ->
-                    def x = ReportInfo.getAllOrganNames().findIndexOf { it -> it == organ}
+                    def x = ReportInfo.getAllOrganNames().findIndexOf { it -> it == organ }
                     def diseaseX = 160f
                     def diseaseY = 546.62f
                     addRectangle(templateDoc, page, Color.RED, [-0.5 + diseaseX + (18.1 + 2.368) * x, 843.5 - 10 - diseaseY - (10 + 2.368) * y, 18.2, 10] as float[])
@@ -1115,207 +1194,217 @@ class ReportService {
     }
 
     private def getTumorSuppressorGeneRelatedOrgan() {
+        File file = ResourceUtils.getFile('classpath:data/tumor_suppressor_gene_related_organ.json')
+        JSON.parseObject(file.getText(StandardCharsets.UTF_8.toString()))
+    }
+
+    private def getCancerRelatedGeneMutationsRelatedOrgan() {
+        File file = ResourceUtils.getFile('classpath:data/cancer_related_gene_mutations_related_organ.json')
+        JSON.parseObject(file.getText(StandardCharsets.UTF_8.toString()))
+    }
+
+    private def getTumorSuppressorGeneRelatedOrganOrigin() {
         [
-                'APAF1': [
+                'APAF1'  : [
                         'mainFunction': '调节细胞的凋亡',
-'organs': '胃, 肝, 甲状腺, 膀胱, 肾脏, 神经胶质'
-                        ],
-                'APC': [
+                        'organs'      : '胃, 肝, 甲状腺, 膀胱, 肾脏, 神经胶质'
+                ],
+                'APC'    : [
                         'mainFunction': '调节细胞增殖与粘连，迁移以及凋亡',
-'organs': '乳房, 子宫内膜, 前列腺, 大肠, 肝, 甲状腺, 膀胱, 食道, 胆囊'
+                        'organs'      : '乳房, 子宫内膜, 前列腺, 大肠, 肝, 甲状腺, 膀胱, 食道, 胆囊'
                 ],
-                'BRCA1': [
+                'BRCA1'  : [
                         'mainFunction': '调节细胞周期，参与修复DNA损伤以及维持遗传物质的稳定性',
-'organs': '乳房, 卵巢, 胃, 甲状腺, 胰腺'
+                        'organs'      : '乳房, 卵巢, 胃, 甲状腺, 胰腺'
                 ],
-                'CDH1': [
+                'CDH1'   : [
                         'mainFunction': '参与细胞间的粘连，抑制癌细胞的浸润',
-'organs': '卵巢, 宫颈, 子宫内膜, 前列腺, 胃, 大肠, 肺, 甲状腺, 膀胱, 胆囊'
+                        'organs'      : '卵巢, 宫颈, 子宫内膜, 前列腺, 胃, 大肠, 肺, 甲状腺, 膀胱, 胆囊'
                 ],
-                'CDH13': [
+                'CDH13'  : [
                         'mainFunction': '抑制癌细胞浸润与增殖的肿瘤抑制基因',
-'organs': '乳房, 卵巢, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 肾脏'
+                        'organs'      : '乳房, 卵巢, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 肾脏'
                 ],
-                'DAPK': [
+                'DAPK'   : [
                         'mainFunction': '诱发细胞凋亡，抑制癌症转移',
-'organs': '乳房, 宫颈, 胃, 肺, 甲状腺, 膀胱, 淋巴'
+                        'organs'      : '乳房, 宫颈, 胃, 肺, 甲状腺, 膀胱, 淋巴'
                 ],
-                'DLEC1': [
+                'DLEC1'  : [
                         'mainFunction': '调节细胞增殖，抑制肿瘤',
-'organs': '乳房, 胃, 大肠, 肺, 肝, 甲状腺, 肾脏, 淋巴'
+                        'organs'      : '乳房, 胃, 大肠, 肺, 肝, 甲状腺, 肾脏, 淋巴'
                 ],
-                'ER-a': [
+                'ER-a'   : [
                         'mainFunction': '调节基因表达，参与细胞增殖',
-'organs': '乳房, 卵巢, 子宫内膜, 前列腺, 胃, 大肠, 甲状腺'
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 前列腺, 胃, 大肠, 甲状腺'
                 ],
-                'ER-b': [
+                'ER-b'   : [
                         'mainFunction': '调节基因表达，参与细胞增殖，与大肠，肝，心肌老化相关',
-'organs': '乳房, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 肾脏'
+                        'organs'      : '乳房, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 肾脏'
                 ],
-                'FHIT': [
+                'FHIT'   : [
                         'mainFunction': '参与细胞凋亡以及调节细胞周期',
-'organs': '乳房, 卵巢, 宫颈, 肾脏, 食道, 胆囊'
+                        'organs'      : '乳房, 卵巢, 宫颈, 肾脏, 食道, 胆囊'
                 ],
-                'GSTP1': [
+                'GSTP1'  : [
                         'mainFunction': '参与解毒酶，修复DNA',
-'organs': '卵巢, 前列腺, 大肠, 肺'
+                        'organs'      : '卵巢, 前列腺, 大肠, 肺'
                 ],
-                'HIC1': [
+                'HIC1'   : [
                         'mainFunction': '参与修复DNA损伤以及细胞凋亡',
-'organs': '卵巢, 宫颈, 前列腺, 胃, 大肠, 肝, 甲状腺, 脑'
+                        'organs'      : '卵巢, 宫颈, 前列腺, 胃, 大肠, 肝, 甲状腺, 脑'
                 ],
-                'hMLH1': [
+                'hMLH1'  : [
                         'mainFunction': '参与修复DNA损伤',
-'organs': '子宫内膜, 胃, 大肠, 肝'
+                        'organs'      : '子宫内膜, 胃, 大肠, 肝'
                 ],
-                'LKB1': [
+                'LKB1'   : [
                         'mainFunction': '调节细胞极性和功能，维持细胞代谢能量平衡',
-'organs': '胃, 肠, 胰腺, 肺, 宫颈, 乳腺'
+                        'organs'      : '胃, 肠, 胰腺, 肺, 宫颈, 乳腺'
                 ],
-                'MGMT': [
+                'MGMT'   : [
                         'mainFunction': '参与修复DNA损伤而抑制基因突变以及形成癌症',
-'organs': '乳房, 胃, 大肠, 肾脏, 食道, 脑, 淋巴'
+                        'organs'      : '乳房, 胃, 大肠, 肾脏, 食道, 脑, 淋巴'
                 ],
-                'MINT1': [
+                'MINT1'  : [
                         'mainFunction': '参与细胞信号转导',
-'organs': '脑, 神经胶质'
+                        'organs'      : '脑, 神经胶质'
                 ],
-                'MINT31': [
+                'MINT31' : [
                         'mainFunction': '参与肿瘤相关基因的过甲基化',
-'organs': '乳房, 卵巢, 胃, 大肠, 肝, 甲状腺, 膀胱'
+                        'organs'      : '乳房, 卵巢, 胃, 大肠, 肝, 甲状腺, 膀胱'
                 ],
-                'MYOD1': [
+                'MYOD1'  : [
                         'mainFunction': '参与细胞分化，再生',
-'organs': '乳房, 胃, 大肠, 肝, 肾脏'
+                        'organs'      : '乳房, 胃, 大肠, 肝, 肾脏'
                 ],
-                'p14ARF': [
+                'p14ARF' : [
                         'mainFunction': '调节细胞周期的核心角色，与MDM蛋白质结合促进p53的激活',
-'organs': '乳房, 卵巢, 前列腺, 胃, 大肠, 甲状腺, 肾脏, 胰腺, 食道, 淋巴'
+                        'organs'      : '乳房, 卵巢, 前列腺, 胃, 大肠, 甲状腺, 肾脏, 胰腺, 食道, 淋巴'
                 ],
-                'p15': [
+                'p15'    : [
                         'mainFunction': '调节细胞周期的核心角色',
-'organs': '胃, 大肠, 肺, 肝, 脑, 淋巴'
+                        'organs'      : '胃, 大肠, 肺, 肝, 脑, 淋巴'
                 ],
-                'p16': [
+                'p16'    : [
                         'mainFunction': '参与细胞周期，通过抑制过度增殖而诱导细胞凋亡',
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 胰腺,胆囊, 脑, 淋巴'
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 胰腺,胆囊, 脑, 淋巴'
                 ],
-                'PTEN': [
+                'PTEN'   : [
                         'mainFunction': '控制过度增殖，抑制生成肿瘤',
-'organs': '卵巢, 宫颈, 甲状腺'
+                        'organs'      : '卵巢, 宫颈, 甲状腺'
                 ],
-                'PYCARD': [
+                'PYCARD' : [
                         'mainFunction': '参与炎症反应与细胞凋亡的信号转导通路',
-'organs': '乳房, 卵巢, 前列腺, 胃, 大肠, 甲状腺'
+                        'organs'      : '乳房, 卵巢, 前列腺, 胃, 大肠, 甲状腺'
                 ],
                 'RASSF1A': [
                         'mainFunction': '参与细胞凋亡及细胞有丝分裂',
-'organs': '乳房, 子宫内膜, 前列腺, 胃, 大肠, 肺, 甲状腺, 胰腺, 脑'
+                        'organs'      : '乳房, 子宫内膜, 前列腺, 胃, 大肠, 肺, 甲状腺, 胰腺, 脑'
                 ],
-                'RUNX3': [
+                'RUNX3'  : [
                         'mainFunction': '调节细胞生长，抑制转移的肿瘤抑制基因',
-'organs': '乳房, 卵巢, 胃, 大肠, 肺, 肝, 膀胱, 肾脏, 胆囊'
+                        'organs'      : '乳房, 卵巢, 胃, 大肠, 肺, 肝, 膀胱, 肾脏, 胆囊'
                 ],
-                'SLC5A8': [
+                'SLC5A8' : [
                         'mainFunction': '参与细胞内运输钠离子，调节细胞生长',
-'organs': '大肠, 甲状腺'
+                        'organs'      : '大肠, 甲状腺'
                 ],
-                'SOCS1': [
+                'SOCS1'  : [
                         'mainFunction': '通过细胞因子参与调节细胞内的信号转导,抑制细胞生长',
-'organs': '胃, 肝, 膀胱'
+                        'organs'      : '胃, 肝, 膀胱'
                 ],
-                'TIMP3': [
+                'TIMP3'  : [
                         'mainFunction': '切断癌细胞的浸润、转移、血管新生',
-'organs': '前列腺, 胃, 大肠, 肝'
+                        'organs'      : '前列腺, 胃, 大肠, 肝'
                 ],
-                'VHL': [
+                'VHL'    : [
                         'mainFunction': '参与细胞生长与分化',
-'organs': '胃, 大肠, 膀胱, 肾脏, 脑'
+                        'organs'      : '胃, 大肠, 膀胱, 肾脏, 脑'
                 ],
-                'WT1': [
+                'WT1'    : [
                         'mainFunction': '诱导细胞凋亡',
-'organs': '卵巢, 胃, 大肠, 肝, 脑'
+                        'organs'      : '卵巢, 胃, 大肠, 肝, 脑'
                 ]
         ]
     }
 
-    private def getCancerRelatedGeneMutationsRelatedOrgan() {
+    private def getCancerRelatedGeneMutationsRelatedOrganOrigin() {
         [
-                'p53 c.524G>A': [
+                'p53 c.524G>A'    : [
                         'mainFunction': '参与细胞凋亡以及调节细胞周期 , 参与修复DNA损伤',
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
-                        ],
-                'p53 c.743G>A': [
-                        'mainFunction': '参与细胞凋亡以及调节细胞周期 , 参与修复DNA损伤',
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
                 ],
-                'p53 c.747G>T': [
+                'p53 c.743G>A'    : [
                         'mainFunction': '参与细胞凋亡以及调节细胞周期 , 参与修复DNA损伤',
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
                 ],
-                'p53 c.817C>T': [
+                'p53 c.747G>T'    : [
                         'mainFunction': '参与细胞凋亡以及调节细胞周期 , 参与修复DNA损伤',
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
+                ],
+                'p53 c.817C>T'    : [
+                        'mainFunction': '参与细胞凋亡以及调节细胞周期 , 参与修复DNA损伤',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 淋巴, 神经胶质'
                 ],
                 'PIK3CA c.1624G>A': [
-                        'mainFunction': '参与细胞的生长、增殖、分化、迁移以及存活等多种细胞内的信号转导通路',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 神经胶质'
+                        'mainFunction': '参与细胞的生长、增殖、分化、迁移以及存活等多种细胞内的信号转导通路',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 神经胶质'
                 ],
                 'PIK3CA c.1633G>A': [
-                        'mainFunction': '参与细胞的生长、增殖、分化、迁移以及存活等多种细胞内的信号转导通路',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 神经胶质'
+                        'mainFunction': '参与细胞的生长、增殖、分化、迁移以及存活等多种细胞内的信号转导通路',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 神经胶质'
                 ],
                 'PIK3CA c.3140A>G': [
-                        'mainFunction': '参与细胞的生长、增殖、分化、迁移以及存活等多种细胞内的信号转导通路',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 神经胶质'
+                        'mainFunction': '参与细胞的生长、增殖、分化、迁移以及存活等多种细胞内的信号转导通路',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺, 食道,胆囊, 脑, 神经胶质'
                 ],
-                'KRAS c.34G>T': [
-                        'mainFunction': '参与细胞生长与分化',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.35G>A),胰腺, 食道, 胆囊,淋巴'
+                'KRAS c.34G>T'    : [
+                        'mainFunction': '参与细胞生长与分化',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.35G>A),胰腺, 食道, 胆囊,淋巴'
                 ],
-                'KRAS c.35G>A': [
-                        'mainFunction': '参与细胞生长与分化',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.36G>A),胰腺, 食道, 胆囊,淋巴'
+                'KRAS c.35G>A'    : [
+                        'mainFunction': '参与细胞生长与分化',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.36G>A),胰腺, 食道, 胆囊,淋巴'
                 ],
-                'KRAS c.35G>T': [
-                        'mainFunction': '参与细胞生长与分化',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.37G>A),胰腺, 食道, 胆囊,淋巴'
+                'KRAS c.35G>T'    : [
+                        'mainFunction': '参与细胞生长与分化',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.37G>A),胰腺, 食道, 胆囊,淋巴'
                 ],
-                'KRAS c.38G>A': [
-                        'mainFunction': '参与细胞生长与分化',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.38G>A),胰腺, 食道, 胆囊,淋巴'
+                'KRAS c.38G>A'    : [
+                        'mainFunction': '参与细胞生长与分化',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏(仅限于c.38G>A),胰腺, 食道, 胆囊,淋巴'
                 ],
-                'PTEN c.388C>G': [
-                        'mainFunction': '控制过度增殖，抑制生成肿瘤',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺,胆囊,脑, 淋巴, 神经胶质'
+                'PTEN c.388C>G'   : [
+                        'mainFunction': '控制过度增殖，抑制生成肿瘤',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺,胆囊,脑, 淋巴, 神经胶质'
                 ],
-                'PTEN c.389G>A': [
-                        'mainFunction': '控制过度增殖，抑制生成肿瘤',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺,胆囊,脑, 淋巴, 神经胶质'
+                'PTEN c.389G>A'   : [
+                        'mainFunction': '控制过度增殖，抑制生成肿瘤',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺,胆囊,脑, 淋巴, 神经胶质'
                 ],
-                'PTEN c.697C>T': [
-                        'mainFunction': '控制过度增殖，抑制生成肿瘤',	
-'organs': '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺,胆囊,脑, 淋巴, 神经胶质'
+                'PTEN c.697C>T'   : [
+                        'mainFunction': '控制过度增殖，抑制生成肿瘤',
+                        'organs'      : '乳房, 卵巢, 子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏, 胰腺,胆囊,脑, 淋巴, 神经胶质'
                 ],
-                'APC c.4348C>T': [
-                        'mainFunction': '调节细胞增殖与粘连、迁移以及凋亡',	
-'organs': '子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 胰腺,食道'
+                'APC c.4348C>T'   : [
+                        'mainFunction': '调节细胞增殖与粘连、迁移以及凋亡',
+                        'organs'      : '子宫内膜, 宫颈, 前列腺, 胃, 大肠, 肺, 肝, 甲状腺, 胰腺,食道'
                 ],
-                'ATM c.1009C>T': [
-                        'mainFunction': '参与修复DNA损伤以及调节细胞凋亡',	
-'organs': '乳房, 子宫内膜, 前列腺, 胃,大肠, 肺, 肝, 膀胱, 肾脏, 胰腺, 淋巴'
+                'ATM c.1009C>T'   : [
+                        'mainFunction': '参与修复DNA损伤以及调节细胞凋亡',
+                        'organs'      : '乳房, 子宫内膜, 前列腺, 胃,大肠, 肺, 肝, 膀胱, 肾脏, 胰腺, 淋巴'
                 ],
-                'BRAF c.1799T>A': [
-                        'mainFunction': '参与细胞内的信号转导而调节细胞增殖、分化以及存活',	
-'organs': '卵巢, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏,胆囊, 脑, 淋巴, 神经胶质'
+                'BRAF c.1799T>A'  : [
+                        'mainFunction': '参与细胞内的信号转导而调节细胞增殖、分化以及存活',
+                        'organs'      : '卵巢, 大肠, 肺, 肝, 甲状腺, 膀胱, 肾脏,胆囊, 脑, 淋巴, 神经胶质'
                 ],
-                'IDH1 c.395G>A': [
-                        'mainFunction': '参与细胞生长与分化',	
-'organs': '神经胶质,胆囊,淋巴组织,甲状腺,大肠,子宫内膜,前列腺,肝,膀胱,乳腺'
+                'IDH1 c.395G>A'   : [
+                        'mainFunction': '参与细胞生长与分化',
+                        'organs'      : '神经胶质,胆囊,淋巴组织,甲状腺,大肠,子宫内膜,前列腺,肝,膀胱,乳腺'
                 ],
-                'RET c.2753T>C': [
-                        'mainFunction': '参与细胞生长与分化',	
-'organs': '乳房,子宫内膜, 大肠, 肺, 甲状腺, 膀胱, 肾脏'
+                'RET c.2753T>C'   : [
+                        'mainFunction': '参与细胞生长与分化',
+                        'organs'      : '乳房,子宫内膜, 大肠, 肺, 甲状腺, 膀胱, 肾脏'
                 ]
         ]
     }
