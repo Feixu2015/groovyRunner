@@ -22,12 +22,12 @@ class GeerApplicationTests {
     void contextLoads() {
     }
 
-    @Test
     void readEatingHabitsAndLivingHabits() {
         def data = readEatingHabitsAndLivingHabitsFromFile(new File('/Users/idcos/Downloads/zhoulinxian/报告基础元素/饮食习惯生活习惯.xlsx'))
         new File('/Users/idcos/Documents/feixu/codes/geer/src/main/resources/data/eating_habits_and_living_habits.json').withWriter(StandardCharsets.UTF_8.toString()) {
             it.write(JSON.toJSONString(data, true))
         }
+        // modify data and match the organs
     }
 
     private def readEatingHabitsAndLivingHabitsFromFile(File excel) {
@@ -53,11 +53,11 @@ class GeerApplicationTests {
                                     'positive': [
                                             'male': [
                                                     'smoke': '',
-                                                    'nonSmoke': '',
+                                                    'noneSmoke': '',
                                             ],
                                             'female': [
                                                     'smoke': '',
-                                                    'nonSmoke': '',
+                                                    'noneSmoke': '',
                                             ]
                                     ],
                                     'other': ''

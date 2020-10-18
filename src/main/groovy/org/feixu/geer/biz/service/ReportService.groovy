@@ -1,12 +1,21 @@
 package org.feixu.geer.biz.service
 
 import com.alibaba.fastjson.JSON
+import com.alibaba.fastjson.JSONArray
+import com.helger.font.api.IHasFontResource
+import com.helger.pdflayout4.PageLayoutPDF
+import com.helger.pdflayout4.base.PLPageSet
+import com.helger.pdflayout4.element.text.PLText
+import com.helger.pdflayout4.spec.FontSpec
+import com.helger.pdflayout4.spec.PreloadFont
+import javafx.application.Application
 import org.apache.commons.lang.StringUtils
 import org.apache.commons.lang.math.RandomUtils
 import org.apache.pdfbox.multipdf.LayerUtility
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
+import org.apache.pdfbox.pdmodel.common.PDRectangle
 import org.apache.pdfbox.pdmodel.font.PDFont
 import org.apache.pdfbox.pdmodel.font.PDType0Font
 import org.apache.pdfbox.pdmodel.font.PDType3Font
@@ -18,6 +27,8 @@ import org.apache.poi.ss.usermodel.Row
 import org.apache.poi.ss.usermodel.Sheet
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory
+import org.feixu.geer.GeerApplication
+import org.feixu.geer.biz.helper.MyFontResource
 import org.feixu.geer.enums.SexEnum
 import org.feixu.geer.model.CancerRelatedGeneMutations
 import org.feixu.geer.model.Organ
@@ -733,9 +744,8 @@ class ReportService {
             fillRiskLevelNum(doc, 2, riskLevelCount as int[])
             // 2.3 详细信息
             fillDetailInfo(doc, 3, report, riskLevelCount as int[])
-            // 2.4 生活习惯建议
-
-            // 2.5 饮食习惯建议
+            // 2.4 生活习惯、饮食习惯建议
+            fillEatingHabitsAndLivingHabitsPropose(doc, report, [positiveOrgans, warnOrgans, attentionOrgans, negativeOrgans])
 
             // 3. 器官详解
             // 阳性
@@ -757,7 +767,7 @@ class ReportService {
             doc.addPage(templateDoc.getPage(1))
 
             // 5. 保存
-            String reportFile = "${targetFolder.getAbsolutePath()}/${user.name}_检测报告_${new Date().format('yyyyMMdd')}.pdf"
+            String reportFile = "${targetFolder.getAbsolutePath()}/${new Date().format('yyyyMMdd')}_${user.name}_检测报告.pdf"
             doc.save(reportFile)
             doc.close()
             // close other pdf
@@ -768,6 +778,7 @@ class ReportService {
 
             result.isSuccess = true
         } catch (e) {
+            e.printStackTrace()
             result.message = e.getMessage()
             log.error("Exception: ${e.class} Detail: ${result.message}")
         }
@@ -792,7 +803,7 @@ class ReportService {
      * @param user
      */
     private void reportAddUserInfo(PDDocument doc, int pageNo, ReportInfo report) {
-        UserInfo user = report.userInfo;
+        UserInfo user = report.userInfo
         def lineSpaceHeight = 19
         // 姓名
         addText(doc, pageNo, user.name, [260, 412 - lineSpaceHeight * 0] as float[], 12f, [0.584f, 0.596f, 0.618f] as float[])
@@ -993,7 +1004,7 @@ class ReportService {
 
         def checkY2 = 555
         // 体重
-        BigDecimal bg = new BigDecimal(user.weight/2);
+        BigDecimal bg = new BigDecimal(user.weight / 2)
         double weightInKg = bg.setScale(1, BigDecimal.ROUND_HALF_UP).doubleValue()
         addText(doc, pageNo, "${weightInKg}kg", [146, checkY2] as float[], 14f, [0.2f, 0.2f, 0.2f] as float[])
         // 饮酒
@@ -1407,5 +1418,312 @@ class ReportService {
                         'organs'      : '乳房,子宫内膜, 大肠, 肺, 甲状腺, 膀胱, 肾脏'
                 ]
         ]
+    }
+
+    private def prepareHabitsPropose() {
+        File file = ResourceUtils.getFile('classpath:data/eating_habits_and_living_habits.json')
+        JSON.parseObject(file.getText(StandardCharsets.UTF_8.toString()))
+    }
+
+    /**
+     * 根据检测结果给出饮食习惯和生活习惯建议
+     * @param doc
+     * @param report
+     * @param classifiedOrgans 划分了风险级别的器官
+     */
+    def fillEatingHabitsAndLivingHabitsPropose(PDDocument doc, ReportInfo report, List<List<Organ>> classifiedOrgans) {
+        def habitsData = prepareHabitsPropose()
+
+        // 1. merge propose
+        def positiveOrgans = classifiedOrgans[0]
+        def eatingHabitsPropose = [
+                'head'   : '',
+                'content': '',
+                'items'  : []
+        ]
+        def livingHabitsPropose = [
+                'head'   : '',
+                'content': '',
+                'items'  : []
+        ]
+        if (positiveOrgans.size() > 0) {
+            UserInfo user = report.userInfo
+            positiveOrgans.each {
+                def habit = habitsData.find { habit -> habit.key == it.name }?.value
+                if (habit) {
+                    if (eatingHabitsPropose.items.size() == 0) {
+                        eatingHabitsPropose = habit.eatingHabits.positive
+                    } else {
+                        eatingHabitsPropose.items.addAll(habit.eatingHabits.positive.items.findAll { item ->
+                            null == eatingHabitsPropose.items.find {
+                                it.title.equals(item.title)
+                            }
+                        })
+                    }
+
+                    def matchedPropose = habit.livingHabits.positive[user.sex.code][user.smokeLevel.equals('无') ? 'nonSmoke' : 'smoke']
+                    if (livingHabitsPropose.size() == 0 && StringUtils.isNotBlank(matchedPropose.head)) {
+                        livingHabitsPropose = matchedPropose
+                    } else {
+                        livingHabitsPropose.items.addAll(matchedPropose.items.findAll { item ->
+                            null == livingHabitsPropose.items.find {
+                                it.title.equals(item.title)
+                            }
+                        })
+                    }
+                }
+            }
+        } else {
+            def otherProposeOrgans = []
+            otherProposeOrgans.addAll(classifiedOrgans[1])
+            otherProposeOrgans.addAll(classifiedOrgans[2])
+            otherProposeOrgans.each {
+                def habit = habitsData.find { habit -> habit.key == it.name }?.value
+                if (habit) {
+                    if (eatingHabitsPropose.items.size() == 0) {
+                        eatingHabitsPropose = habit.eatingHabits.other
+                    } else {
+                        eatingHabitsPropose.items.addAll(habit.eatingHabits.other.items.findAll { item ->
+                            null == eatingHabitsPropose.items.find {
+                                it.title.equals(item.title)
+                            }
+                        })
+                    }
+
+                    def matchedPropose = habit.livingHabits.other
+                    if (livingHabitsPropose.size() == 0 && StringUtils.isNotBlank(matchedPropose.head)) {
+                        livingHabitsPropose = matchedPropose
+                    } else {
+                        livingHabitsPropose.items.addAll(matchedPropose.items.findAll { item ->
+                            null == livingHabitsPropose.items.find {
+                                it.title.equals(item.title)
+                            }
+                        })
+                    }
+                }
+            }
+        }
+
+        log.info("饮食习惯" + JSON.toJSONString(eatingHabitsPropose, true))
+        log.info("生活习惯" + JSON.toJSONString(livingHabitsPropose, true))
+
+        // 2. draw propose
+        // 饮食习惯
+        //addHabitsPropose(doc, 4, eatingHabitsPropose, [100, 412] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
+        addMultiLineText(doc, 3, eatingHabitsPropose, [300, 240, 20, 90] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
+
+        // 生活习惯
+        //addHabitsPropose(doc, 4, livingHabitsPropose, [260, 412] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
+        addMultiLineText(doc, 3, livingHabitsPropose, [300, 20, 20, 90] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
+
+    }
+
+    /**
+     * 使用pdfbox-layout实现
+     * @param doc
+     * @param pageNo
+     * @param habits [ 'title': '', 'common': '', 'items': [] ]
+     * @param position [ x, y ] as float[]
+     * @param fontSize
+     * @param nonStrokingColor [ r, g, b ] as float[]
+     * @param lineWidth
+     * @return
+     */
+    private def addHabitsPropose(PDDocument doc, int pageNo, def habits, float[] position, float[] nonStrokingColor, float lineWidth) {
+        File file = ResourceUtils.getFile("classpath:meterial/Template_空白页.pdf")
+        PDDocument targetDoc = PDDocument.load(file)
+        PDPageContentStream cs = new PDPageContentStream(targetDoc, targetDoc.getPage(0))
+        //def ttfPath = '/Users/idcos/Downloads/字体/msyh.ttf'
+        File fontFile = ResourceUtils.getFile("classpath:meterial/msyh.ttf")
+        PDFont font = PDType0Font.load(targetDoc, fontFile)
+        cs.beginText()
+
+        cs.newLineAtOffset(position[0], position[1])
+        cs.setLineWidth(lineWidth)
+        cs.setStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
+        cs.setNonStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
+
+        habits.each { key, value ->
+            if ((value instanceof String && StringUtils.isNotBlank(value))
+                    || (value instanceof Collection && value.size() > 0)) {
+                switch (key) {
+                    case 'title':
+                        cs.setFont(font, 14.52f)
+                        cs.showText(value)
+                        cs.newLine()
+                        cs.newLine()
+                        break
+                    case 'common':
+                        cs.setFont(font, 10.22f)
+                        cs.showText(value)
+                        cs.newLine()
+                        cs.newLine()
+                        break
+                    case 'items':
+                        value.each { k, v ->
+                            switch (k) {
+                                case 'title':
+                                    cs.setFont(font, 14.52f)
+                                    cs.showText(value.title)
+                                    cs.newLine()
+                                    break
+                                case 'content':
+                                    cs.setFont(font, 10.22f)
+                                    cs.showText(value.content)
+                                    cs.newLine()
+                                    cs.newLine()
+                                    break
+                                default:
+                                    break
+                            }
+                        }
+                        break
+                    default:
+                        break
+                }
+            }
+        }
+        cs.endText()
+
+        cs.close()
+
+        LayerUtility layerUtility = new LayerUtility(doc)
+        PDFormXObject firstForm = layerUtility.importPageAsForm(targetDoc, 0)
+        AffineTransform affineTransform = new AffineTransform()
+        layerUtility.appendFormAsLayer(doc.getPage(pageNo), firstForm, affineTransform, "text${UUID.randomUUID().toString()}")
+
+        targetDoc.close()
+    }
+
+    private def addTextWithReturn(PDDocument doc, int pageNo, def habits, float[] position, float[] nonStrokingColor, float lineWidth) {
+        final PreloadFont aFont = PreloadFont.createEmbedding(MyFontResource.MICROSOFT_YAHEI.getFontResource())
+        FontSpec fontSpec = new FontSpec(aFont, 10.22f)
+        final PLPageSet aPS1 = new PLPageSet(PDRectangle.A4)
+        final float fLineSpacing = 1.5f
+
+        //aPS1.addElement(new PLText(paragraph, fontSpec))
+        String text = ""
+        habits.each { key, value ->
+            if ((value instanceof String && StringUtils.isNotBlank(value))
+                    || (value instanceof Collection && value.size() > 0)) {
+                switch (key) {
+                    case 'head':
+                        fontSpec = new FontSpec(PreloadFont.REGULAR, 14.52f)
+                        /*aPS1.addElement(new PLText(value + '\n', fontSpec)
+                                .setMargin(position[0], position[1], position[2], position[3])
+                                .setMaxWidth(lineWidth))*/
+                        text += value + '\n'
+                        break
+                    case 'common':
+                        fontSpec = new FontSpec(PreloadFont.REGULAR, 10.22f)
+                        /*aPS1.addElement(new PLText(value + '\n', fontSpec))*/
+                        text += value + '\n'
+                        break
+                    case 'items':
+                        value.each { item ->
+                            fontSpec = new FontSpec(PreloadFont.REGULAR, 14.52f)
+                            /*aPS1.addElement(new PLText(item.title + '\n', fontSpec))*/
+                            text += item.title + '\n'
+
+                            fontSpec = new FontSpec(PreloadFont.REGULAR, 10.22f)
+                            /*aPS1.addElement(new PLText(item.content + '\n', fontSpec))*/
+                            text += item.content + '\n'
+                        }
+                        break
+                    default:
+                        break
+                }
+            }
+        }
+        aPS1.addElement(new PLText(text, fontSpec))
+
+        final PageLayoutPDF aPageLayout = new PageLayoutPDF().setCompressPDF(false)
+        aPageLayout.addPageSet(aPS1)
+        File textFile = new File("tmp/${UUID.randomUUID().toString()}.pdf")
+        aPageLayout.renderTo(textFile)
+
+        PDDocument targetDoc = PDDocument.load(textFile)
+        LayerUtility layerUtility = new LayerUtility(doc)
+        PDFormXObject firstForm = layerUtility.importPageAsForm(targetDoc, 0)
+        AffineTransform affineTransform = new AffineTransform()
+        layerUtility.appendFormAsLayer(doc.getPage(pageNo), firstForm, affineTransform, "text${UUID.randomUUID().toString()}")
+
+        targetDoc.close()
+        //Files.delete(textFile.toPath())
+    }
+
+    public static def addMultiLineText(PDDocument doc, int pageNo, def habits, float[] position, float[] nonStrokingColor, float lineWidth) {
+        File file = ResourceUtils.getFile("classpath:meterial/Template_空白页.pdf")
+        PDDocument targetDoc = null
+        try {
+            targetDoc = PDDocument.load(file)
+            PDPage page = targetDoc.getPage(0)
+            PDPageContentStream contentStream = new PDPageContentStream(doc, page)
+
+            File fontFile = ResourceUtils.getFile("classpath:meterial/msyh.ttf")
+            PDFont pdfFont = PDType0Font.load(doc, fontFile)
+
+            //String text = "I am trying to create a PDF file with a lot of text contents in the document. I am using PDFBox"
+
+            contentStream.beginText()
+            contentStream.newLineAtOffset(position[0], position[1])
+            contentStream.setStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
+            float fontSize = 14.52f
+            habits.each { key, v ->
+                if (v instanceof String && StringUtils.isNotBlank(v)) {
+                    def value = v.replace('\r', '').replace('\n', '')
+                    switch (key) {
+                        case 'head':
+                            fontSize = 14.52f
+                            contentStream.setFont(pdfFont, fontSize)
+                            contentStream.showText(value)
+                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            break
+                        case 'common':
+                            fontSize = 10.22f
+                            contentStream.setFont(pdfFont, fontSize)
+                            contentStream.showText(value)
+                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            break
+                        default:
+                            break
+                    }
+                } else if (v instanceof JSONArray && v.size() > 0) {
+                    switch (key) {
+                        case 'items':
+                            v.each { item ->
+                                fontSize = 14.52f
+                                contentStream.setFont(pdfFont, fontSize)
+                                contentStream.showText(item.title)
+                                contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+
+                                fontSize = 10.22f
+                                contentStream.setFont(pdfFont, fontSize)
+                                contentStream.showText(item.content)
+                                contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            }
+                            break
+                        default:
+                            break
+                    }
+                }
+            }
+            contentStream.endText()
+            contentStream.close()
+
+            LayerUtility layerUtility = new LayerUtility(doc)
+            PDFormXObject firstForm = layerUtility.importPageAsForm(targetDoc, 0)
+            AffineTransform affineTransform = new AffineTransform()
+            layerUtility.appendFormAsLayer(doc.getPage(pageNo), firstForm, affineTransform, "text${UUID.randomUUID().toString()}")
+
+        } catch (e) {
+            e.printStackTrace()
+        } finally {
+            if (targetDoc != null) {
+                targetDoc.close()
+            }
+        }
     }
 }
