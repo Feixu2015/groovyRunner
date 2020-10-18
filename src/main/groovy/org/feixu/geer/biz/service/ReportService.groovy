@@ -1462,7 +1462,7 @@ class ReportService {
                     }
 
                     def matchedPropose = habit.livingHabits.positive[user.sex.code][user.smokeLevel.equals('无') ? 'nonSmoke' : 'smoke']
-                    if (livingHabitsPropose.size() == 0 && StringUtils.isNotBlank(matchedPropose.head)) {
+                    if (livingHabitsPropose.items.size() == 0 && StringUtils.isNotBlank(matchedPropose.head)) {
                         livingHabitsPropose = matchedPropose
                     } else {
                         livingHabitsPropose.items.addAll(matchedPropose.items.findAll { item ->
@@ -1491,7 +1491,7 @@ class ReportService {
                     }
 
                     def matchedPropose = habit.livingHabits.other
-                    if (livingHabitsPropose.size() == 0 && StringUtils.isNotBlank(matchedPropose.head)) {
+                    if (livingHabitsPropose.items.size() == 0 && StringUtils.isNotBlank(matchedPropose.head)) {
                         livingHabitsPropose = matchedPropose
                     } else {
                         livingHabitsPropose.items.addAll(matchedPropose.items.findAll { item ->
@@ -1508,13 +1508,13 @@ class ReportService {
         log.info("生活习惯" + JSON.toJSONString(livingHabitsPropose, true))
 
         // 2. draw propose
-        // 饮食习惯
-        //addHabitsPropose(doc, 4, eatingHabitsPropose, [100, 412] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
-        addMultiLineText(doc, 3, eatingHabitsPropose, [300, 240, 20, 90] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
-
         // 生活习惯
         //addHabitsPropose(doc, 4, livingHabitsPropose, [260, 412] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
-        addMultiLineText(doc, 3, livingHabitsPropose, [300, 20, 20, 90] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
+        addMultiLineText(doc, 3, livingHabitsPropose, [72, 388] as float[], [0.2f, 0.2f, 0.2f] as float[], 200f)
+
+        // 饮食习惯
+        //addHabitsPropose(doc, 4, eatingHabitsPropose, [100, 412] as float[], [0.584f, 0.596f, 0.618f] as float[], 200f)
+        addMultiLineText(doc, 3, eatingHabitsPropose, [309, 388] as float[], [0.2f, 0.2f, 0.2f] as float[], 200f)
 
     }
 
@@ -1663,29 +1663,50 @@ class ReportService {
             File fontFile = ResourceUtils.getFile("classpath:meterial/msyh.ttf")
             PDFont pdfFont = PDType0Font.load(doc, fontFile)
 
-            //String text = "I am trying to create a PDF file with a lot of text contents in the document. I am using PDFBox"
+            //String text = "I am tryingx to create a PDF file with a lot of text contents in the document. I am using PDFBox"
 
+            //contentStream.setLineWidth(lineWidth)
             contentStream.beginText()
             contentStream.newLineAtOffset(position[0], position[1])
             contentStream.setStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
+            contentStream.setNonStrokingColor(nonStrokingColor[0], nonStrokingColor[1], nonStrokingColor[2])
             float fontSize = 14.52f
+            def splitToLines = { value, count ->
+                def lines = []
+                int pos = 0
+                int len = Math.min(value.length(), count)
+                while(pos < value.length()) {
+                    if (pos + len > value.length()) {
+                        len = value.length() - pos
+                    }
+                    lines << value.substring(pos, pos + len)
+
+                    pos = pos + len
+                }
+                lines
+            }
             habits.each { key, v ->
                 if (v instanceof String && StringUtils.isNotBlank(v)) {
                     def value = v.replace('\r', '').replace('\n', '')
                     switch (key) {
                         case 'head':
-                            fontSize = 14.52f
+                            fontSize = 12f
                             contentStream.setFont(pdfFont, fontSize)
-                            contentStream.showText(value)
-                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
-                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            def lines = splitToLines(value, 18)
+                            lines.each {
+                                contentStream.showText(it)
+                                contentStream.newLineAtOffset(0, -fontSize*1.2 as float)
+                            }
                             break
                         case 'common':
-                            fontSize = 10.22f
+                            fontSize = 10f
+                            contentStream.newLineAtOffset(0, -fontSize*1.2 as float)
                             contentStream.setFont(pdfFont, fontSize)
-                            contentStream.showText(value)
-                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
-                            contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                            def lines = splitToLines(value, 21)
+                            lines.each {
+                                contentStream.showText(it)
+                                contentStream.newLineAtOffset(0, -fontSize*1.2 as float)
+                            }
                             break
                         default:
                             break
@@ -1693,16 +1714,24 @@ class ReportService {
                 } else if (v instanceof JSONArray && v.size() > 0) {
                     switch (key) {
                         case 'items':
+                            fontSize = 12f
                             v.each { item ->
-                                fontSize = 14.52f
+                                fontSize = 12f
+                                contentStream.newLineAtOffset(0, -fontSize*1.2 as float)
                                 contentStream.setFont(pdfFont, fontSize)
-                                contentStream.showText(item.title)
-                                contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                                def lines = splitToLines(item.title, 18)
+                                lines.each {
+                                    contentStream.showText(it)
+                                    contentStream.newLineAtOffset(0, -fontSize*1.2 as float)
+                                }
 
-                                fontSize = 10.22f
+                                fontSize = 10f
                                 contentStream.setFont(pdfFont, fontSize)
-                                contentStream.showText(item.content)
-                                contentStream.newLineAtOffset(0, -fontSize * 1.5 as float)
+                                lines = splitToLines(item.content, 21)
+                                lines.each {
+                                    contentStream.showText(it)
+                                    contentStream.newLineAtOffset(0, -fontSize*1.2 as float)
+                                }
                             }
                             break
                         default:
